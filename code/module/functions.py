@@ -1,29 +1,11 @@
-import os
+import re
 import csv
-import requests
-import pandas as pd
+import asyncio
+import aiohttp 
 
 from lxml import etree
-from fake_useragent import UserAgent
-
-user_agent = UserAgent()
-
-def getPage(url, max_retries=5):
-
-    times = 0
-
-    while times < max_retries:
-
-        try:
-            session = requests.session()
-            res = session.get(url, headers={'user-agent': user_agent.random}, timeout=(5.05, 27)) # connect & read timeout
-            session.cookies.clear()
-            htmltext = res.text
-            
-            return htmltext
-
-        except requests.exceptions.RequestException:
-            times += 1
+from .utils import getPage, getPage_async, logging_and_print
+from .metadata import OUTPUT_FILENAME, FAILED_OUTPUT_FILENAME, CONCURRENT_LIMIT
 
 # 獲取全筆劃 & 字數
 def get_stroke_and_nums_list(htmltext):
@@ -56,14 +38,20 @@ def get_last_page_num(base_url, stroke):
     
     return {stroke : last_page_num}
 
-def get_words_by_stroke_and_page_num(base_url, stroke, page_num):
+def combine_urls(base_url, stroke, page_num):
 
     stroke_query = f'&SN={stroke}'
     page_query = f'&PAGE={page_num}'
 
     target_url = base_url + stroke_query + page_query
+    
+    return target_url
 
-    htmltext = getPage(target_url)
+def get_words_by_url(target_url, proxy=None):
+
+    stroke = re.search('(&SN=)([0-9]+)', target_url).group(2)
+
+    htmltext = getPage(target_url, proxy=proxy)
 
     xdoc = etree.HTML(htmltext)
 
@@ -73,29 +61,44 @@ def get_words_by_stroke_and_page_num(base_url, stroke, page_num):
     elif "".join(xdoc.xpath("//table[@class='frame']//td[@class='pageName']/text()")) == '字形資訊':
         words = list(xdoc.xpath("//div[@class='col2 Lt Ft'][2]//div[2]/img/@alt"))
 
-    # dicts = dict(zip(words, cycle([stroke])))
     dicts = list(zip(words, [stroke] * len(words)))
     
     return iter(dicts)
+    
+async def get_words_by_url_async(urls_list, available_proxies, concurrent_limit=CONCURRENT_LIMIT, output_file=OUTPUT_FILENAME, failed_output=FAILED_OUTPUT_FILENAME):
+    
+    batch_size = len(available_proxies)
+    
+    if batch_size > CONCURRENT_LIMIT:
+        concurrent_limit = batch_size
 
-def create_file(output_file):
+    semaphore = asyncio.Semaphore(concurrent_limit)
 
-    if os.path.exists(output_file) == False:
-        open(output_file, "w").close
-        logging_and_print(f'[Crawler] {output_file} created.')
+    htmltext_lst = await asyncio.gather(*[getPage_async(target_url, semaphore=semaphore, proxy=proxy) for target_url, proxy in zip(urls_list, available_proxies)])
 
-        return create_file(output_file)
+    try:
+        for htmltext, target_url in zip(htmltext_lst, urls_list):
 
-    else:
+            stroke = re.search('(&SN=)([0-9]+)', target_url).group(2)
 
-        with open(output_file, 'r+', encoding='UTF-8') as f:
-            line = f.readline()
+            xdoc = etree.HTML(htmltext)
 
-        if "字" in line and "筆畫" in line:
-            logging_and_print(f'[Crawler] {output_file} existed.')
+            if "".join(xdoc.xpath("//table[@class='frame']//td[@class='pageName']/text()")) == '筆畫查詢':
+                words = list(xdoc.xpath("//div[@class='wordList']/span/a/img/@alt"))
 
-        else:
+            elif "".join(xdoc.xpath("//table[@class='frame']//td[@class='pageName']/text()")) == '字形資訊':
+                words = list(xdoc.xpath("//div[@class='col2 Lt Ft'][2]//div[2]/img/@alt"))
+
+            dicts = list(zip(words, [stroke] * len(words)))
+
             with open(output_file, 'a', newline='', encoding='UTF-8') as f:
                 writer = csv.writer(f)
-                writer.writerow(['字', '筆畫']) # header
-                logging_and_print(f'[Crawler] {output_file} header added.')
+                writer.writerows(iter(dicts))
+
+                logging_and_print(f"[Crawler] {target_url} scrapped.")  
+
+    except:
+        with open(failed_output, 'a+') as f:
+            f.write(f'{target_url}\n')
+
+        logging_and_print(f"[Crawler] Can't get {target_url}.")

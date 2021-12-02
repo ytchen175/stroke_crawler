@@ -1,20 +1,16 @@
 import re
-import csv
-import time
-import random
+
 import asyncio
-import aiohttp 
+import argparse
 import pandas as pd
 
 from module.utils import *
 from module.functions import *
 from module.metadata import BASE_URL, PROXY_POOL_URL, REFRESH_FREQUENCY, CONCURRENT_LIMIT, OUTPUT_FILENAME, FAILED_OUTPUT_FILENAME
 
-def main():
+async def main():
     
     tmp = {}
-
-    request_times = 0
     
     htmltext = getPage(BASE_URL)
 
@@ -48,33 +44,29 @@ def main():
     """" Start Crawling """
     create_file(OUTPUT_FILENAME)
 
-    for url in urls_list:
+    finished = set()
+    unfinished = set(urls_list)
 
-        try:
-            delay = [1, 3, 5, 7]
-            time.sleep(random.choice(delay))
-            
-            with open(OUTPUT_FILENAME, 'a', newline='', encoding='UTF-8') as f:
+    while unfinished:
 
-                writer = csv.writer(f)
+        available_proxies = get_proxy(PROXY_POOL_URL, option='all')
 
-                if request_times % REFRESH_FREQUENCY == 0:
-                    
-                    origin_proxy = proxy
+        batch_size = len(available_proxies) 
 
-                    proxy = get_proxy(PROXY_POOL_URL) 
-                    logging_and_print(f"[Crawler] Changed {origin_proxy} to {proxy}.") 
-                
-                writer.writerows(get_words_by_url(url, proxy=proxy))
+        waiting = set(random.sample(unfinished, batch_size))
 
-                request_times += 1
-                logging_and_print(f"[Crawler] {url} scrapped, requests time : {request_times}.")    
-                
-        except:
-            with open(FAILED_OUTPUT_FILENAME, 'a+') as f:
-                f.write(f'{url}\n')
+        logging_and_print(f'[Crawler] Now handling URLs : {waiting}.')
 
-            logging_and_print(f"[Crawler] Can't get {url}.")
+        await get_words_by_url_async(waiting, available_proxies) 
+        
+        finished.update(waiting)
+
+        unfinished -= waiting
+
+        logging_and_print(f'[Crawler] Finished : {finished}, {len(unfinished)} URLs remained.')
+
+    else:
+        logging_and_print(f'[Crawler] All done !')
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
