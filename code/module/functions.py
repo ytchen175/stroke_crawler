@@ -47,6 +47,13 @@ def combine_urls(base_url, stroke, page_num):
     
     return target_url
 
+def resume_progress(urls_list, base_url, stroke, page_num):
+
+    target_url = combine_urls(base_url, stroke, page_num)
+    start_from = urls_list.index(target_url)
+
+    return urls_list[start_from + 1 :]
+
 def get_words_by_url(target_url, proxy=None):
 
     stroke = re.search('(&SN=)([0-9]+)', target_url).group(2)
@@ -74,6 +81,7 @@ async def get_words_by_url_async(urls_list, available_proxies, concurrent_limit=
 
     semaphore = asyncio.Semaphore(concurrent_limit)
 
+    # clip urls_list to the length of available_proxies
     htmltext_lst = await asyncio.gather(*[getPage_async(target_url, semaphore=semaphore, proxy=proxy) for target_url, proxy in zip(urls_list, available_proxies)])
 
     try:

@@ -36,7 +36,7 @@ def create_file(output_file):
 
     else:
 
-        with open(output_file, 'r+', encoding='UTF-8') as f:
+        with open(output_file, 'r', encoding='UTF-8') as f:
             line = f.readline()
 
         if "字" in line and "筆畫" in line:
@@ -50,26 +50,21 @@ def create_file(output_file):
 
 """ Network """
 
-def get_proxy(proxy_pool_url, option='get'):
+def get_proxy(proxy_pool_url, option='get', type='https'):
     
-    proxy_pool = f'{proxy_pool_url}/{option}/'
+    proxy_pool = f'{proxy_pool_url}/{option}/?type={type}'
 
     r = getPage(proxy_pool)
     response = json.loads(r)
     
     if option == 'get':
-
+        
         return response['proxy']
         
     elif option == 'all':
         available_proxies = [data['proxy'] for data in response]
 
         return available_proxies
-
-    elif option == 'count':
-        available_proxies_count = response['count']['total']
-
-        return available_proxies_count
 
 def getPage(url, max_retries=5, proxy=None):
 
@@ -101,7 +96,11 @@ def getPage(url, max_retries=5, proxy=None):
 async def getPage_async(url, semaphore, max_retries=5, proxy=None):
 
     times = 0
-    proxy = f'http://{proxy}'
+
+    if proxy:
+        proxy = f"http://{proxy}"
+
+    logging_and_print(f'[Crawler] Using proxy : {proxy}')
 
     while times < max_retries:
 
@@ -109,12 +108,17 @@ async def getPage_async(url, semaphore, max_retries=5, proxy=None):
             async with semaphore:
                 async with aiohttp.ClientSession(headers={'user-agent': user_agent.random}, timeout=aiohttp.ClientTimeout(total=7)) as session:
                     async with session.get(url, proxy=proxy) as res:
-                        time.sleep(1)
+                        time.sleep(random.choice([1, 3, 5]))
                         return await res.text()
 
         except asyncio.exceptions.TimeoutError:
+            
+            times += 1
+            time.sleep(random.choice([1, 3, 5, 7]))
+            logging_and_print(f'[Crawler] asyncio.exceptions.TimeoutError occured.retry times : {times}')
+
+        except aiohttp.client_exceptions.ClientHttpProxyError:
 
             times += 1
-
-            delay = [1, 3, 5, 7]
-            time.sleep(random.choice(delay))
+            time.sleep(77)
+            logging_and_print(f'[Crawler] aiohttp.client_exceptions.ClientHttpProxyError occured.retry times : {times}')

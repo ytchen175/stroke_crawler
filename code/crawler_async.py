@@ -6,9 +6,9 @@ import pandas as pd
 
 from module.utils import *
 from module.functions import *
-from module.metadata import BASE_URL, PROXY_POOL_URL, REFRESH_FREQUENCY, CONCURRENT_LIMIT, OUTPUT_FILENAME, FAILED_OUTPUT_FILENAME
+from module.metadata import BASE_URL, PROXY_POOL_URL, OUTPUT_FILENAME, FAILED_OUTPUT_FILENAME
 
-async def main():
+async def main(argument):
     
     tmp = {}
     
@@ -40,6 +40,11 @@ async def main():
     for stroke, last_page_num in zip(stroke_lst, stroke_last_page_num):
         for page_num in list(map(lambda x : x+1, range(last_page_num))):
             urls_list.append(combine_urls(BASE_URL, stroke, page_num))
+            
+    if argument.SN and argument.PAGE:
+
+        urls_list = resume_progress(urls_list, BASE_URL, argument.SN, argument.PAGE)
+        print(f"[Crawler] Resume progress from SN={argument.SN} and PAGE={argument.PAGE}, {len(urls_list)} urls lefting...")
 
     """" Start Crawling """
     create_file(OUTPUT_FILENAME)
@@ -49,7 +54,7 @@ async def main():
 
     while unfinished:
 
-        available_proxies = get_proxy(PROXY_POOL_URL, option='all')
+        available_proxies = get_proxy(PROXY_POOL_URL, option='all', type='https')
 
         batch_size = len(available_proxies) 
 
@@ -68,5 +73,30 @@ async def main():
     else:
         logging_and_print(f'[Crawler] All done !')
 
+def _parse_args():
+    """Parses command-line arguments."""
+
+    parser = argparse.ArgumentParser(
+        description="Initial or Resume Progress. If resume, then specify SN and page.")
+
+    parser.add_argument(
+        '--SN',
+        help='Resume progress from SN = ?.',
+        dest='SN',
+        default=None
+    )
+
+    parser.add_argument(
+        '--PAGE',
+        help='Resume progress from PAGE = ?.',
+        dest='PAGE',
+        default=None
+    )
+    
+    args, unknown = parser.parse_known_args()
+    
+    return args
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    argument = _parse_args()
+    asyncio.run(main(argument))
